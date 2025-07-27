@@ -4,6 +4,7 @@ import { openai } from "@ai-sdk/openai"
 import { z } from "zod"
 
 const dishSchema = z.object({
+  id: z.string().default(() => Math.random().toString(36).substr(2, 9)),
   name: z.string().describe("The name of the dish"),
   description: z.string().optional().describe("Brief description of the dish"),
   price: z.string().optional().describe("Price of the dish if visible"),
@@ -30,7 +31,7 @@ export async function POST(request: NextRequest) {
           content: [
             {
               type: "text",
-              text: "Analyze this restaurant menu image and extract all the dishes with their details. Focus on identifying dish names, descriptions, prices, and categories. Be thorough and accurate. Group similar items and organize by typical menu sections.",
+              text: "Analyze this restaurant menu image and extract all the dishes with their details. Focus on identifying dish names, descriptions, prices, and categories. Be thorough and accurate. Group similar items and organize by typical menu sections. Assign each dish a unique ID.",
             },
             {
               type: "image",

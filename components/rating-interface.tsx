@@ -1,301 +1,290 @@
 "use client"
 
 import { useState } from "react"
-import { ArrowLeft, Star, ChefHat, MapPin, Calendar, Save, Sparkles } from "lucide-react"
+import { ArrowLeft, Star, Save, MapPin, Calendar, Camera } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { createClient } from "@/lib/supabase/client"
-import { useAuth } from "@/components/providers/auth-provider"
-import { useToast } from "@/hooks/use-toast"
+
+interface Dish {
+  id: string
+  name: string
+  description?: string
+  price?: string
+  category: string
+}
+
+interface RatingData {
+  dishId: string
+  rating: number
+  notes: string
+  wantToRecreate: boolean
+}
 
 interface RatingInterfaceProps {
-  dishes: any[]
-  onVisitComplete: (visit: any) => void
+  dishes: Dish[]
+  restaurantName: string
+  location?: string
+  onRatingsComplete: (ratings: RatingData[], visitNotes: string) => void
   onBack: () => void
 }
 
-export function RatingInterface({ dishes, onVisitComplete, onBack }: RatingInterfaceProps) {
-  const [restaurantName, setRestaurantName] = useState("")
-  const [location, setLocation] = useState("")
-  const [overallRating, setOverallRating] = useState(0)
-  const [notes, setNotes] = useState("")
-  const [dishRatings, setDishRatings] = useState<
-    Record<string, { rating: number; notes: string; wantToRecreate: boolean }>
-  >({})
-  const [isLoading, setIsLoading] = useState(false)
-  const { user } = useAuth()
-  const { toast } = useToast()
-  const supabase = createClient()
+export default function RatingInterface({
+  dishes,
+  restaurantName,
+  location,
+  onRatingsComplete,
+  onBack,
+}: RatingInterfaceProps) {
+  const [currentDishIndex, setCurrentDishIndex] = useState(0)
+  const [ratings, setRatings] = useState<Record<string, RatingData>>({})
+  const [visitNotes, setVisitNotes] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
-  const updateDishRating = (dishId: string, rating: number) => {
-    setDishRatings((prev) => ({
+  const currentDish = dishes[currentDishIndex]
+  const currentRating = ratings[currentDish?.id] || {
+    dishId: currentDish?.id || "",
+    rating: 0,
+    notes: "",
+    wantToRecreate: false,
+  }
+
+  const updateRating = (dishId: string, updates: Partial<RatingData>) => {
+    setRatings((prev) => ({
       ...prev,
-      [dishId]: { ...prev[dishId], rating },
+      [dishId]: {
+        ...prev[dishId],
+        dishId,
+        ...updates,
+      },
     }))
   }
 
-  const updateDishNotes = (dishId: string, notes: string) => {
-    setDishRatings((prev) => ({
-      ...prev,
-      [dishId]: { ...prev[dishId], notes },
-    }))
+  const setStarRating = (rating: number) => {
+    updateRating(currentDish.id, { rating })
   }
 
-  const updateWantToRecreate = (dishId: string, wantToRecreate: boolean) => {
-    setDishRatings((prev) => ({
-      ...prev,
-      [dishId]: { ...prev[dishId], wantToRecreate },
-    }))
-  }
-
-  const handleSave = async () => {
-    if (!restaurantName.trim() || !user) return
-
-    setIsLoading(true)
-
-    try {
-      // Create restaurant visit
-      const { data: visit, error: visitError } = await supabase
-        .from("restaurant_visits")
-        .insert({
-          user_id: user.id,
-          restaurant_name: restaurantName.trim(),
-          location: location.trim() || null,
-          visit_date: new Date().toISOString().split("T")[0],
-          overall_rating: overallRating || null,
-          notes: notes.trim() || null,
-        })
-        .select()
-        .single()
-
-      if (visitError) throw visitError
-
-      // Create dishes
-      const dishesToInsert = dishes.map((dish) => ({
-        visit_id: visit.id,
-        name: dish.name,
-        description: dish.description || null,
-        price: dish.price || null,
-        category: dish.category || null,
-        ordered: true,
-        rating: dishRatings[dish.id]?.rating || null,
-        notes: dishRatings[dish.id]?.notes || null,
-        want_to_recreate: dishRatings[dish.id]?.wantToRecreate || false,
-      }))
-
-      const { error: dishesError } = await supabase.from("dishes").insert(dishesToInsert)
-
-      if (dishesError) throw dishesError
-
-      // Generate AI recipes for dishes marked for recreation
-      const dishesToRecreate = dishes.filter((dish) => dishRatings[dish.id]?.wantToRecreate)
-
-      if (dishesToRecreate.length > 0) {
-        // This would trigger recipe generation in the background
-        fetch("/api/generate-recipes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            visitId: visit.id,
-            dishes: dishesToRecreate,
-            restaurantName: restaurantName.trim(),
-          }),
-        }).catch(console.error) // Fire and forget
-      }
-
-      toast({
-        title: "Visit saved!",
-        description: `Your experience at ${restaurantName} has been recorded.`,
-      })
-
-      onVisitComplete(visit)
-    } catch (error) {
-      console.error("Error saving visit:", error)
-      toast({
-        title: "Error saving visit",
-        description: "Please try again.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoading(false)
+  const nextDish = () => {
+    if (currentDishIndex < dishes.length - 1) {
+      setCurrentDishIndex(currentDishIndex + 1)
     }
   }
 
-  const allRated = dishes.every((dish) => dishRatings[dish.id]?.rating > 0)
-  const canSave = restaurantName.trim() && allRated && !isLoading
+  const previousDish = () => {
+    if (currentDishIndex > 0) {
+      setCurrentDishIndex(currentDishIndex - 1)
+    }
+  }
+
+  const handleSubmit = async () => {
+    setIsSubmitting(true)
+    try {
+      const ratingsArray = Object.values(ratings).filter((rating) => rating.rating > 0)
+      await onRatingsComplete(ratingsArray, visitNotes)
+    } catch (error) {
+      console.error("Error submitting ratings:", error)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const completedRatings = Object.values(ratings).filter((r) => r.rating > 0).length
+  const progress = (completedRatings / dishes.length) * 100
 
   return (
     <div className="fixed inset-0 bg-white z-50">
       <div className="flex flex-col h-full">
+        {/* Header */}
         <div className="bg-white border-b">
           <div className="flex items-center justify-between p-4">
             <Button variant="ghost" size="sm" onClick={onBack}>
               <ArrowLeft className="h-5 w-5" />
             </Button>
-            <h1 className="font-semibold">Rate Your Experience</h1>
-            <Button onClick={handleSave} disabled={!canSave} size="sm" className="bg-orange-500 hover:bg-orange-600">
-              {isLoading ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-1"></div>
-                  Saving...
-                </>
-              ) : (
-                <>
-                  <Save className="h-4 w-4 mr-1" />
-                  Save
-                </>
-              )}
-            </Button>
+            <div className="text-center">
+              <h1 className="font-semibold">Rate Your Experience</h1>
+              <p className="text-sm text-gray-600">
+                {currentDishIndex + 1} of {dishes.length} dishes
+              </p>
+            </div>
+            <div className="w-10" />
+          </div>
+
+          {/* Progress bar */}
+          <div className="px-4 pb-4">
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className="bg-gradient-to-r from-orange-500 to-amber-500 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <p className="text-xs text-gray-600 mt-1 text-center">
+              {completedRatings} of {dishes.length} dishes rated
+            </p>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-4 space-y-6">
-            {/* Restaurant Info */}
-            <Card>
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {/* Restaurant info */}
+          <Card className="mb-6">
+            <CardContent className="p-4">
+              <div className="flex items-start space-x-3">
+                <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-amber-400 rounded-lg flex items-center justify-center">
+                  <Camera className="h-6 w-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <h2 className="font-semibold text-gray-900">{restaurantName}</h2>
+                  {location && (
+                    <div className="flex items-center space-x-1 text-sm text-gray-600 mt-1">
+                      <MapPin className="h-3 w-3" />
+                      <span>{location}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center space-x-1 text-sm text-gray-600 mt-1">
+                    <Calendar className="h-3 w-3" />
+                    <span>{new Date().toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Current dish rating */}
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between">
+                <span className="truncate">{currentDish.name}</span>
+                <Badge variant="outline">{currentDish.category}</Badge>
+              </CardTitle>
+              {currentDish.description && <p className="text-sm text-gray-600">{currentDish.description}</p>}
+              {currentDish.price && (
+                <Badge variant="secondary" className="w-fit">
+                  {currentDish.price}
+                </Badge>
+              )}
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Star rating */}
+              <div className="text-center">
+                <p className="text-sm font-medium text-gray-700 mb-3">How was this dish?</p>
+                <div className="flex justify-center space-x-2 mb-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      onClick={() => setStarRating(star)}
+                      className="p-1 transition-transform hover:scale-110"
+                    >
+                      <Star
+                        className={`h-8 w-8 ${
+                          star <= currentRating.rating
+                            ? "fill-orange-400 text-orange-400"
+                            : "text-gray-300 hover:text-orange-300"
+                        }`}
+                      />
+                    </button>
+                  ))}
+                </div>
+                {currentRating.rating > 0 && (
+                  <p className="text-sm text-gray-600">
+                    {currentRating.rating === 1 && "Poor"}
+                    {currentRating.rating === 2 && "Fair"}
+                    {currentRating.rating === 3 && "Good"}
+                    {currentRating.rating === 4 && "Very Good"}
+                    {currentRating.rating === 5 && "Excellent"}
+                  </p>
+                )}
+              </div>
+
+              {/* Notes */}
+              <div>
+                <Label htmlFor="notes" className="text-sm font-medium">
+                  Notes (optional)
+                </Label>
+                <Textarea
+                  id="notes"
+                  placeholder="What did you think? Any special ingredients or flavors?"
+                  value={currentRating.notes}
+                  onChange={(e) => updateRating(currentDish.id, { notes: e.target.value })}
+                  className="mt-1"
+                  rows={3}
+                />
+              </div>
+
+              {/* Want to recreate */}
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="recreate"
+                  checked={currentRating.wantToRecreate}
+                  onCheckedChange={(checked) => updateRating(currentDish.id, { wantToRecreate: checked })}
+                />
+                <Label htmlFor="recreate" className="text-sm">
+                  I want to find recipes for this dish
+                </Label>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Visit notes (show on last dish) */}
+          {currentDishIndex === dishes.length - 1 && (
+            <Card className="mb-6">
               <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <ChefHat className="h-5 w-5 text-orange-500" />
-                  <span>Restaurant Details</span>
-                </CardTitle>
+                <CardTitle>Overall Visit Notes</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label htmlFor="restaurant-name">Restaurant Name *</Label>
-                  <Input
-                    id="restaurant-name"
-                    placeholder="Enter restaurant name"
-                    value={restaurantName}
-                    onChange={(e) => setRestaurantName(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="location">Location</Label>
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                    <Input
-                      id="location"
-                      placeholder="Enter location (optional)"
-                      value={location}
-                      onChange={(e) => setLocation(e.target.value)}
-                      className="pl-10"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <Label>Overall Experience</Label>
-                  <div className="flex space-x-1 mt-2">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button key={star} onClick={() => setOverallRating(star)} className="p-1">
-                        <Star
-                          className={`h-6 w-6 ${
-                            star <= overallRating ? "fill-orange-400 text-orange-400" : "text-gray-300"
-                          }`}
-                        />
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <Label htmlFor="visit-notes">Visit Notes</Label>
-                  <Textarea
-                    id="visit-notes"
-                    placeholder="How was your overall experience?"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    rows={2}
-                  />
-                </div>
-                <div className="flex items-center space-x-2 text-sm text-gray-600">
-                  <Calendar className="h-4 w-4" />
-                  <span>{new Date().toLocaleDateString()}</span>
-                </div>
+              <CardContent>
+                <Textarea
+                  placeholder="How was your overall experience at this restaurant?"
+                  value={visitNotes}
+                  onChange={(e) => setVisitNotes(e.target.value)}
+                  rows={3}
+                />
               </CardContent>
             </Card>
-
-            {/* Dish Ratings */}
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-gray-900">Rate Your Dishes</h2>
-              {dishes.map((dish) => (
-                <Card key={dish.id}>
-                  <CardContent className="p-4">
-                    <div className="space-y-4">
-                      <div>
-                        <div className="flex items-start justify-between mb-2">
-                          <h3 className="font-semibold text-gray-900">{dish.name}</h3>
-                          {dish.price && <Badge variant="outline">{dish.price}</Badge>}
-                        </div>
-                        {dish.description && <p className="text-sm text-gray-600 mb-3">{dish.description}</p>}
-                      </div>
-
-                      {/* Star Rating */}
-                      <div>
-                        <Label>Rating *</Label>
-                        <div className="flex space-x-1 mt-2">
-                          {[1, 2, 3, 4, 5].map((star) => (
-                            <button key={star} onClick={() => updateDishRating(dish.id, star)} className="p-1">
-                              <Star
-                                className={`h-6 w-6 ${
-                                  star <= (dishRatings[dish.id]?.rating || 0)
-                                    ? "fill-orange-400 text-orange-400"
-                                    : "text-gray-300"
-                                }`}
-                              />
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Notes */}
-                      <div>
-                        <Label>Notes</Label>
-                        <Textarea
-                          placeholder="How was this dish? Any special notes..."
-                          value={dishRatings[dish.id]?.notes || ""}
-                          onChange={(e) => updateDishNotes(dish.id, e.target.value)}
-                          rows={2}
-                        />
-                      </div>
-
-                      {/* Want to Recreate */}
-                      <div className="flex items-center space-x-2">
-                        <Switch
-                          id={`recreate-${dish.id}`}
-                          checked={dishRatings[dish.id]?.wantToRecreate || false}
-                          onCheckedChange={(checked) => updateWantToRecreate(dish.id, checked)}
-                        />
-                        <Label htmlFor={`recreate-${dish.id}`} className="flex items-center space-x-2 cursor-pointer">
-                          <Sparkles className="h-4 w-4 text-orange-500" />
-                          <span>I want to recreate this at home</span>
-                        </Label>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
+          )}
         </div>
 
+        {/* Navigation */}
         <div className="bg-white border-t p-4">
-          <Button
-            onClick={handleSave}
-            disabled={!canSave}
-            className="w-full bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-semibold h-12"
-          >
-            {!restaurantName.trim()
-              ? "Enter restaurant name"
-              : !allRated
-                ? "Rate all dishes"
-                : isLoading
-                  ? "Saving experience..."
-                  : "Save Experience"}
-          </Button>
+          <div className="flex justify-between items-center">
+            <Button variant="outline" onClick={previousDish} disabled={currentDishIndex === 0}>
+              Previous
+            </Button>
+
+            <div className="flex space-x-2">
+              {dishes.map((_, index) => (
+                <div
+                  key={index}
+                  className={`w-2 h-2 rounded-full ${
+                    index === currentDishIndex
+                      ? "bg-orange-500"
+                      : ratings[dishes[index].id]?.rating > 0
+                        ? "bg-green-500"
+                        : "bg-gray-300"
+                  }`}
+                />
+              ))}
+            </div>
+
+            {currentDishIndex === dishes.length - 1 ? (
+              <Button
+                onClick={handleSubmit}
+                disabled={completedRatings === 0 || isSubmitting}
+                className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
+              >
+                <Save className="h-4 w-4 mr-2" />
+                {isSubmitting ? "Saving..." : "Save Visit"}
+              </Button>
+            ) : (
+              <Button
+                onClick={nextDish}
+                className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
+              >
+                Next
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>
