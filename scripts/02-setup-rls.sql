@@ -1,74 +1,98 @@
--- Enable Row Level Security
-alter table public.users enable row level security;
-alter table public.restaurant_visits enable row level security;
-alter table public.dishes enable row level security;
-alter table public.recipes enable row level security;
+-- Enable Row Level Security on all tables
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE restaurant_visits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dishes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE recipes ENABLE ROW LEVEL SECURITY;
 
--- Users policies
-create policy "Users can view own profile" on public.users
-  for select using (auth.uid() = id);
+-- Profiles policies
+CREATE POLICY "Users can view their own profile" ON profiles
+  FOR SELECT USING (auth.uid() = id);
 
-create policy "Users can update own profile" on public.users
-  for update using (auth.uid() = id);
+CREATE POLICY "Users can update their own profile" ON profiles
+  FOR UPDATE USING (auth.uid() = id);
 
-create policy "Users can insert own profile" on public.users
-  for insert with check (auth.uid() = id);
+CREATE POLICY "Users can insert their own profile" ON profiles
+  FOR INSERT WITH CHECK (auth.uid() = id);
 
 -- Restaurant visits policies
-create policy "Users can view own visits" on public.restaurant_visits
-  for select using (auth.uid() = user_id);
+CREATE POLICY "Users can view their own visits" ON restaurant_visits
+  FOR SELECT USING (auth.uid() = user_id);
 
-create policy "Users can insert own visits" on public.restaurant_visits
-  for insert with check (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own visits" ON restaurant_visits
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
 
-create policy "Users can update own visits" on public.restaurant_visits
-  for update using (auth.uid() = user_id);
+CREATE POLICY "Users can update their own visits" ON restaurant_visits
+  FOR UPDATE USING (auth.uid() = user_id);
 
-create policy "Users can delete own visits" on public.restaurant_visits
-  for delete using (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own visits" ON restaurant_visits
+  FOR DELETE USING (auth.uid() = user_id);
 
 -- Dishes policies
-create policy "Users can view dishes from own visits" on public.dishes
-  for select using (
-    exists (
-      select 1 from public.restaurant_visits rv
-      where rv.id = dishes.visit_id and rv.user_id = auth.uid()
+CREATE POLICY "Users can view dishes from their visits" ON dishes
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM restaurant_visits 
+      WHERE restaurant_visits.id = dishes.visit_id 
+      AND restaurant_visits.user_id = auth.uid()
     )
   );
 
-create policy "Users can insert dishes to own visits" on public.dishes
-  for insert with check (
-    exists (
-      select 1 from public.restaurant_visits rv
-      where rv.id = dishes.visit_id and rv.user_id = auth.uid()
+CREATE POLICY "Users can insert dishes for their visits" ON dishes
+  FOR INSERT WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM restaurant_visits 
+      WHERE restaurant_visits.id = dishes.visit_id 
+      AND restaurant_visits.user_id = auth.uid()
     )
   );
 
-create policy "Users can update dishes from own visits" on public.dishes
-  for update using (
-    exists (
-      select 1 from public.restaurant_visits rv
-      where rv.id = dishes.visit_id and rv.user_id = auth.uid()
+CREATE POLICY "Users can update dishes from their visits" ON dishes
+  FOR UPDATE USING (
+    EXISTS (
+      SELECT 1 FROM restaurant_visits 
+      WHERE restaurant_visits.id = dishes.visit_id 
+      AND restaurant_visits.user_id = auth.uid()
     )
   );
 
-create policy "Users can delete dishes from own visits" on public.dishes
-  for delete using (
-    exists (
-      select 1 from public.restaurant_visits rv
-      where rv.id = dishes.visit_id and rv.user_id = auth.uid()
+CREATE POLICY "Users can delete dishes from their visits" ON dishes
+  FOR DELETE USING (
+    EXISTS (
+      SELECT 1 FROM restaurant_visits 
+      WHERE restaurant_visits.id = dishes.visit_id 
+      AND restaurant_visits.user_id = auth.uid()
     )
   );
 
 -- Recipes policies
-create policy "Users can view own recipes" on public.recipes
-  for select using (auth.uid() = user_id);
+CREATE POLICY "Users can view their own recipes" ON recipes
+  FOR SELECT USING (auth.uid() = user_id);
 
-create policy "Users can insert own recipes" on public.recipes
-  for insert with check (auth.uid() = user_id);
+CREATE POLICY "Users can insert their own recipes" ON recipes
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
 
-create policy "Users can update own recipes" on public.recipes
-  for update using (auth.uid() = user_id);
+CREATE POLICY "Users can update their own recipes" ON recipes
+  FOR UPDATE USING (auth.uid() = user_id);
 
-create policy "Users can delete own recipes" on public.recipes
-  for delete using (auth.uid() = user_id);
+CREATE POLICY "Users can delete their own recipes" ON recipes
+  FOR DELETE USING (auth.uid() = user_id);
+
+-- Function to handle new user signup
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, display_name, avatar_url)
+  VALUES (
+    NEW.id,
+    NEW.email,
+    NEW.raw_user_meta_data->>'display_name',
+    NEW.raw_user_meta_data->>'avatar_url'
+  );
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger to automatically create profile on signup
+CREATE OR REPLACE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();

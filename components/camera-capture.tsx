@@ -1,9 +1,12 @@
 "use client"
 
 import { useState, useRef, useCallback } from "react"
-import { Camera, RotateCcw, X, Check, FlashlightOffIcon as FlashOff, FlashlightIcon as Flash } from "lucide-react"
+import { Camera, RotateCcw, X, Check, FlashlightOffIcon as FlashOff, FlashlightIcon as Flash, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { storage } from "@/lib/storage"
+import { useAuth } from "@/components/providers/auth-provider"
+import { useToast } from "@/hooks/use-toast"
 
 interface CameraCaptureProps {
   onPhotoCapture: (photo: string) => void
@@ -11,9 +14,12 @@ interface CameraCaptureProps {
 }
 
 export default function CameraCapture({ onPhotoCapture, onBack }: CameraCaptureProps) {
+  const { user } = useAuth()
+  const { toast } = useToast()
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [capturedPhoto, setCapturedPhoto] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isUploading, setIsUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [flashEnabled, setFlashEnabled] = useState(false)
   const [facingMode, setFacingMode] = useState<"user" | "environment">("environment")
@@ -80,11 +86,31 @@ export default function CameraCapture({ onPhotoCapture, onBack }: CameraCaptureP
     startCamera()
   }, [startCamera])
 
-  const confirmPhoto = useCallback(() => {
-    if (capturedPhoto) {
-      onPhotoCapture(capturedPhoto)
+  const confirmPhoto = useCallback(async () => {
+    if (capturedPhoto && user) {
+      setIsUploading(true)
+      try {
+        // Upload photo to Supabase Storage
+        const photoUrl = await storage.uploadBase64Photo(capturedPhoto, user.id)
+        onPhotoCapture(photoUrl)
+        toast({
+          title: "Photo uploaded successfully!",
+          description: "Your menu photo has been saved to the cloud.",
+        })
+      } catch (error) {
+        console.error("Error uploading photo:", error)
+        toast({
+          title: "Upload failed",
+          description: "Failed to upload photo. Please try again.",
+          variant: "destructive",
+        })
+        // Fallback to base64 if upload fails
+        onPhotoCapture(capturedPhoto)
+      } finally {
+        setIsUploading(false)
+      }
     }
-  }, [capturedPhoto, onPhotoCapture])
+  }, [capturedPhoto, onPhotoCapture, user, toast])
 
   const toggleCamera = useCallback(() => {
     stopCamera()
@@ -150,10 +176,20 @@ export default function CameraCapture({ onPhotoCapture, onBack }: CameraCaptureP
                   <Button
                     size="lg"
                     onClick={confirmPhoto}
+                    disabled={isUploading}
                     className="bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
                   >
-                    <Check className="h-5 w-5 mr-2" />
-                    Use Photo
+                    {isUploading ? (
+                      <>
+                        <Upload className="h-5 w-5 mr-2 animate-pulse" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-5 w-5 mr-2" />
+                        Use Photo
+                      </>
+                    )}
                   </Button>
                 </div>
               </div>

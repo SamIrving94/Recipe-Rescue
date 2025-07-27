@@ -1,71 +1,85 @@
 -- Enable UUID extension
 create extension if not exists "uuid-ossp";
 
--- Users table (extends Supabase auth.users)
-create table public.users (
-  id uuid references auth.users primary key,
-  email text unique not null,
-  username text unique,
-  display_name text,
-  avatar_url text,
-  created_at timestamp with time zone default now(),
-  updated_at timestamp with time zone default now()
+-- Create profiles table
+CREATE TABLE IF NOT EXISTS profiles (
+  id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  display_name TEXT,
+  avatar_url TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Restaurant visits
-create table public.restaurant_visits (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.users(id) on delete cascade not null,
-  restaurant_name text not null,
-  location text,
-  visit_date date not null,
-  overall_rating integer check (overall_rating >= 1 and overall_rating <= 5),
-  notes text,
-  menu_photo_url text,
-  created_at timestamp with time zone default now(),
-  updated_at timestamp with time zone default now()
+-- Create restaurant_visits table
+CREATE TABLE IF NOT EXISTS restaurant_visits (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  restaurant_name TEXT NOT NULL,
+  location TEXT,
+  visit_date DATE NOT NULL,
+  menu_photo_url TEXT,
+  overall_rating DECIMAL(3,2) CHECK (overall_rating >= 0 AND overall_rating <= 5),
+  notes TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Dishes from restaurant visits
-create table public.dishes (
-  id uuid default gen_random_uuid() primary key,
-  visit_id uuid references public.restaurant_visits(id) on delete cascade not null,
-  name text not null,
-  description text,
-  price text,
-  category text,
-  ordered boolean default false,
-  rating integer check (rating >= 1 and rating <= 5),
-  notes text,
-  want_to_recreate boolean default false,
-  created_at timestamp with time zone default now(),
-  updated_at timestamp with time zone default now()
+-- Create dishes table
+CREATE TABLE IF NOT EXISTS dishes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  visit_id UUID REFERENCES restaurant_visits(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  price TEXT,
+  category TEXT,
+  ordered BOOLEAN DEFAULT false,
+  rating DECIMAL(3,2) CHECK (rating >= 0 AND rating <= 5),
+  notes TEXT,
+  want_to_recreate BOOLEAN DEFAULT false,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Recipes discovered/saved
-create table public.recipes (
-  id uuid default gen_random_uuid() primary key,
-  user_id uuid references public.users(id) on delete cascade not null,
-  title text not null,
-  source_url text,
-  source_type text check (source_type in ('web', 'photo', 'ai', 'restaurant')),
-  image_url text,
-  ingredients text[],
-  instructions text[],
-  cook_time text,
-  servings text,
-  difficulty text check (difficulty in ('easy', 'medium', 'hard')),
-  cuisine_type text,
-  linked_dish_id uuid references public.dishes(id),
-  saved_at timestamp with time zone default now(),
-  updated_at timestamp with time zone default now()
+-- Create recipes table
+CREATE TABLE IF NOT EXISTS recipes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  title TEXT NOT NULL,
+  source_url TEXT,
+  source_type TEXT DEFAULT 'generated',
+  image_url TEXT,
+  ingredients TEXT[] NOT NULL,
+  instructions TEXT[] NOT NULL,
+  cook_time TEXT,
+  servings INTEGER,
+  difficulty TEXT,
+  cuisine_type TEXT,
+  linked_dish_id UUID REFERENCES dishes(id) ON DELETE SET NULL,
+  saved_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- Create indexes for better performance
-create index idx_restaurant_visits_user_id on public.restaurant_visits(user_id);
-create index idx_restaurant_visits_visit_date on public.restaurant_visits(visit_date desc);
-create index idx_dishes_visit_id on public.dishes(visit_id);
-create index idx_dishes_ordered on public.dishes(ordered) where ordered = true;
-create index idx_recipes_user_id on public.recipes(user_id);
-create index idx_recipes_linked_dish_id on public.recipes(linked_dish_id);
-create index idx_recipes_saved_at on public.recipes(saved_at desc);
+CREATE INDEX IF NOT EXISTS idx_restaurant_visits_user_id ON restaurant_visits(user_id);
+CREATE INDEX IF NOT EXISTS idx_restaurant_visits_visit_date ON restaurant_visits(visit_date);
+CREATE INDEX IF NOT EXISTS idx_dishes_visit_id ON dishes(visit_id);
+CREATE INDEX IF NOT EXISTS idx_dishes_name ON dishes(name);
+CREATE INDEX IF NOT EXISTS idx_recipes_user_id ON recipes(user_id);
+CREATE INDEX IF NOT EXISTS idx_recipes_linked_dish_id ON recipes(linked_dish_id);
+
+-- Create updated_at trigger function
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Create triggers for updated_at
+CREATE TRIGGER update_profiles_updated_at BEFORE UPDATE ON profiles FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_restaurant_visits_updated_at BEFORE UPDATE ON restaurant_visits FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_dishes_updated_at BEFORE UPDATE ON dishes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_recipes_updated_at BEFORE UPDATE ON recipes FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

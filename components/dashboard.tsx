@@ -13,7 +13,8 @@ import RatingInterface from "./rating-interface"
 import RecipeDiscovery from "./recipe-discovery"
 import VisitTimeline from "./visit-timeline"
 import type { RestaurantVisit } from "@/types"
-import { createClient } from "@/lib/supabase/client"
+import { db } from "@/lib/database"
+import { useToast } from "@/hooks/use-toast"
 
 interface User {
   id: string
@@ -29,6 +30,7 @@ interface DashboardProps {
 type AppState = "dashboard" | "camera" | "analyzing" | "dish-selection" | "rating" | "recipe-discovery" | "timeline"
 
 export default function Dashboard({ user }: DashboardProps) {
+  const { toast } = useToast()
   const [appState, setAppState] = useState<AppState>("dashboard")
   const [visits, setVisits] = useState<RestaurantVisit[]>([])
   const [loading, setLoading] = useState(true)
@@ -40,47 +42,21 @@ export default function Dashboard({ user }: DashboardProps) {
   const [selectedDishes, setSelectedDishes] = useState<any[]>([])
   const [selectedDishForRecipe, setSelectedDishForRecipe] = useState<string>("")
 
-  const supabase = createClient()
-
   useEffect(() => {
     loadVisits()
   }, [])
 
   const loadVisits = async () => {
     try {
-      const { data, error } = await supabase
-        .from("restaurant_visits")
-        .select(`
-          *,
-          dishes (*)
-        `)
-        .eq("user_id", user.id)
-        .order("visit_date", { ascending: false })
-
-      if (error) throw error
-
-      const formattedVisits: RestaurantVisit[] = data.map((visit) => ({
-        id: visit.id,
-        restaurantName: visit.restaurant_name,
-        location: visit.location,
-        date: visit.visit_date,
-        menuPhoto: visit.menu_photo_url,
-        notes: visit.notes,
-        dishes: visit.dishes.map((dish: any) => ({
-          id: dish.id,
-          name: dish.name,
-          description: dish.description,
-          price: dish.price,
-          category: dish.category,
-          rating: dish.rating || 0,
-          notes: dish.notes,
-          wantToRecreate: dish.want_to_recreate,
-        })),
-      }))
-
-      setVisits(formattedVisits)
+      const visits = await db.getVisits(user.id)
+      setVisits(visits)
     } catch (error) {
       console.error("Error loading visits:", error)
+      toast({
+        title: "Error loading visits",
+        description: "Failed to load your restaurant visits. Please try again.",
+        variant: "destructive",
+      })
     } finally {
       setLoading(false)
     }
@@ -104,24 +80,18 @@ export default function Dashboard({ user }: DashboardProps) {
   const handleRatingsComplete = async (ratings: any[], visitNotes: string) => {
     try {
       // Create visit record
-      const { data: visitData, error: visitError } = await supabase
-        .from("restaurant_visits")
-        .insert({
-          user_id: user.id,
-          restaurant_name: "Restaurant Name", // This should come from the form
-          location: "Location", // This should come from the form
-          visit_date: new Date().toISOString(),
-          menu_photo_url: currentPhoto,
-          notes: visitNotes,
-        })
-        .select()
-        .single()
-
-      if (visitError) throw visitError
+      const visitId = await db.createVisit({
+        userId: user.id,
+        restaurantName: "Restaurant Name", // This should come from the form
+        location: "Location", // This should come from the form
+        visitDate: new Date().toISOString(),
+        menuPhotoUrl: currentPhoto || undefined,
+        notes: visitNotes,
+      })
 
       // Create dish records
-      const dishInserts = ratings.map((rating) => ({
-        visit_id: visitData.id,
+      const dishes = ratings.map((rating) => ({
+        visitId,
         name: selectedDishes.find((d) => d.id === rating.dishId)?.name || "",
         description: selectedDishes.find((d) => d.id === rating.dishId)?.description,
         price: selectedDishes.find((d) => d.id === rating.dishId)?.price,
@@ -129,12 +99,15 @@ export default function Dashboard({ user }: DashboardProps) {
         ordered: true,
         rating: rating.rating,
         notes: rating.notes,
-        want_to_recreate: rating.wantToRecreate,
+        wantToRecreate: rating.wantToRecreate,
       }))
 
-      const { error: dishError } = await supabase.from("dishes").insert(dishInserts)
+      await db.createDishes(dishes)
 
-      if (dishError) throw dishError
+      toast({
+        title: "Visit saved!",
+        description: "Your restaurant visit has been successfully saved.",
+      })
 
       // Reset state and reload visits
       setCurrentPhoto(null)
@@ -144,6 +117,11 @@ export default function Dashboard({ user }: DashboardProps) {
       loadVisits()
     } catch (error) {
       console.error("Error saving visit:", error)
+      toast({
+        title: "Error saving visit",
+        description: "Failed to save your visit. Please try again.",
+        variant: "destructive",
+      })
     }
   }
 
